@@ -48,7 +48,7 @@ jobs:
       - name: Update pluginmaster.json version
         run: |
           $version = "${{ steps.version.outputs.VERSION }}"
-          $json = Get-Content pluginmaster.json | ConvertFrom-Json
+          $json = @(Get-Content pluginmaster.json | ConvertFrom-Json)
           $json[0].AssemblyVersion = $version
           $json[0].TestingAssemblyVersion = $version
           $json | ConvertTo-Json -Depth 10 | Set-Content pluginmaster.json

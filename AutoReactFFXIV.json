@@ -3,12 +3,13 @@
     "Name": "Auto React",
     "InternalName": "AutoReactFFXIV",
     "Punchline": "Auto-Guard against Marksman's Spite in PvP.",
-    "Description": "Detects when an enemy Machinist uses Marksman's Spite on you in PvP and automatically cancels your current action and uses Guard to survive.",
+    "Description": "Detects when an enemy Machinist uses Marksman's Spite on you and automatically uses Guard. Includes an Execute tab to coordinate your own Marksman's Spite with a teammate, with optional auto-Bravery sequencing.",
     "ApplicableVersion": "any",
     "DalamudApiLevel": 14,
     "Tags": [
         "pvp",
         "combat",
         "utility"
-    ]
+    ],
+    "CategoryTags": ["Combat"]
 }
