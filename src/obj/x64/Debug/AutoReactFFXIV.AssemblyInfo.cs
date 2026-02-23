@@ -12,11 +12,11 @@ using System.Reflection;
 
 [assembly: System.Reflection.AssemblyCompanyAttribute("AutoReactFFXIV")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
-[assembly: System.Reflection.AssemblyFileVersionAttribute("0.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.1.0")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("0.3.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.3.0+ff33d16be75b43f0043e7a770b3828950208d042")]
 [assembly: System.Reflection.AssemblyProductAttribute("AutoReactFFXIV")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AutoReactFFXIV")]
-[assembly: System.Reflection.AssemblyVersionAttribute("0.1.0.0")]
+[assembly: System.Reflection.AssemblyVersionAttribute("0.3.0.0")]
 [assembly: System.Runtime.Versioning.TargetPlatformAttribute("Windows7.0")]
 [assembly: System.Runtime.Versioning.SupportedOSPlatformAttribute("Windows7.0")]
 

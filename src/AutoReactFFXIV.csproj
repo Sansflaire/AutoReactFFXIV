@@ -12,7 +12,7 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AssemblyName>AutoReactFFXIV</AssemblyName>
     <RootNamespace>AutoReactFFXIV</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.3.0</Version>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -31,7 +31,7 @@
     <Reference Include="Serilog" HintPath="$(DalamudLibPath)Serilog.dll" Private="false" />
   </ItemGroup>
 
-  <Target Name="CopyToDevPlugins" AfterTargets="Build">
+  <Target Name="CopyToDevPlugins" AfterTargets="Build" Condition="'$(Configuration)' == 'Debug'">
     <Copy
       SourceFiles="$(TargetPath)"
       DestinationFolder="$(APPDATA)\XIVLauncher\devPlugins\AutoReactFFXIV\"

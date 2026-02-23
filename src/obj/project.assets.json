@@ -12,7 +12,7 @@
     "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages": {}
   },
   "project": {
-    "version": "0.1.0",
+    "version": "0.3.0",
     "restore": {
       "projectUniqueName": "C:\\Users\\trist\\AppData\\Roaming\\XIVLauncher\\devPlugins\\AutoReactFFXIV\\src\\AutoReactFFXIV.csproj",
       "projectName": "AutoReactFFXIV",

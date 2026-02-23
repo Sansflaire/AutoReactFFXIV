@@ -8,3 +8,4 @@ C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\bin\x64
 C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\bin\x64\Debug\AutoReactFFXIV.pdb
 C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.dll
 C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.pdb
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.sourcelink.json
