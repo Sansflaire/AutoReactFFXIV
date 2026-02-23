@@ -51,7 +51,7 @@ jobs:
           $json = @(Get-Content pluginmaster.json | ConvertFrom-Json)
           $json[0].AssemblyVersion = $version
           $json[0].TestingAssemblyVersion = $version
-          $json | ConvertTo-Json -Depth 10 | Set-Content pluginmaster.json
+          $json | ConvertTo-Json -Depth 10 -AsArray | Set-Content pluginmaster.json
         shell: pwsh
 
       - name: Create Release
