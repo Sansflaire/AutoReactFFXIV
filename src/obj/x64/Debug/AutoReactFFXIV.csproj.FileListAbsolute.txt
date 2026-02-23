@@ -1,0 +1,10 @@
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.csproj.AssemblyReference.cache
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.AssemblyInfoInputs.cache
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.AssemblyInfo.cs
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.csproj.CoreCompileInputs.cache
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\bin\x64\Debug\AutoReactFFXIV.deps.json
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\bin\x64\Debug\AutoReactFFXIV.dll
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\bin\x64\Debug\AutoReactFFXIV.pdb
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.dll
+C:\Users\trist\AppData\Roaming\XIVLauncher\devPlugins\AutoReactFFXIV\src\obj\x64\Debug\AutoReactFFXIV.pdb

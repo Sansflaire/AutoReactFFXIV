@@ -1,0 +1,450 @@
+==============================================================================
+AUTO REACT -- FFXIV Dalamud Plugin Design Document
+==============================================================================
+
+Plugin Name:    Auto React
+Internal Name:  AutoReactFFXIV
+Author:         Claude & Trist
+Status:         Design Phase
+Created:        2026-02-22
+
+==============================================================================
+PURPOSE
+==============================================================================
+
+Auto React is a PvP defense plugin with one specific job: detect when an
+enemy Machinist is about to hit you with Marksman's Spite (their Limit Break)
+and automatically cancel your current actions and use Guard to survive it.
+
+This is a single-purpose, fast-reaction plugin. Not a general-purpose
+combat bot. It solves one problem: dying to Marksman's Spite because you
+couldn't react fast enough.
+
+==============================================================================
+THE THREAT: MARKSMAN'S SPITE (PvP)
+==============================================================================
+
+Marksman's Spite is the Machinist PvP Limit Break.
+
+  Potency:        40,000 (enough to one-shot most jobs)
+  Cast Time:      Instant (no cast bar)
+  Range:          50 yalms (longest range in PvP)
+  Recast:         10 seconds (requires full LB gauge)
+  Delay:          ~1.75 seconds between activation and damage landing
+  Visual:         Targeting reticle appears on victim during delay
+  Debuff:         None confirmed -- no status effect on your debuff bar
+  Counterplay:    Use Guard during the ~1.75s window before damage lands
+
+The ~1.75s delay is the entire reaction window. A human has to:
+  1. Notice the reticle (requires battle effects on for opponents)
+  2. Recognize it as Marksman's Spite
+  3. Cancel current action
+  4. Press Guard
+  5. Guard must resolve before damage lands
+
+That's a lot of steps in under 2 seconds. This plugin automates steps 1-5.
+
+Note: Patch 7.16 shortened the delay between activation and effect. The
+exact current delay should be verified in-game.
+
+==============================================================================
+THE DEFENSE: GUARD (PvP)
+==============================================================================
+
+Guard is a universal PvP ability available to all jobs.
+
+  Cast Time:      Instant
+  Recast:         30 seconds
+  Duration:       4 seconds
+  Effect:         90% damage reduction + immunity to Stun, Heavy, Bind,
+                  Silence, Half-asleep, Sleep, Deep Freeze, knockback,
+                  and draw-in effects
+  Movement:       33% speed penalty while active
+  Cancellation:   Ends if you use another action, reuse Guard, or it expires
+  DoT Note:       DoTs applied BEFORE Guard still tick at full strength
+
+Key fact: Guard is instant and can be used at any time. If we detect the
+Spite, we just need to cancel whatever we're doing and fire Guard.
+
+==============================================================================
+DETECTION STRATEGY
+==============================================================================
+
+Marksman's Spite is INSTANT (no cast bar), so we CANNOT detect it by polling
+IBattleChara.IsCasting. By the time cast state updates, the ability has
+already been used. We need a different approach.
+
+We have three detection vectors, in order of reliability:
+
+--- Vector 1: ReceiveActionEffect Hook (PRIMARY) ---
+
+Hook the game's ReceiveActionEffect function. This fires when the server
+tells your client that an action has been used. For Marksman's Spite, this
+should fire during the ~1.75s delay BEFORE the damage resolves, because:
+
+  - The MCH uses the ability (instant)
+  - Server sends ActionEffect packet to all nearby clients
+  - Your client receives it and processes the hook
+  - ~1.75s animation plays
+  - Damage resolves
+
+The hook gives us:
+  - Source character ID (the MCH who used it)
+  - Action ID (we match against Marksman's Spite's action ID)
+  - Target character ID (we check if it's US)
+
+If source is MCH + action is Marksman's Spite + target is us = GUARD NOW.
+
+This is the same hook WrathCombo uses in ActionWatching.cs. It's the
+standard way Dalamud plugins observe incoming actions.
+
+Implementation:
+  - Use IGameInteropProvider to hook ReceiveActionEffect
+  - Signature: same as WrathCombo's ReceiveActionEffectHook
+  - Filter: action ID == Marksman's Spite PvP action ID
+  - Filter: target object ID == local player object ID
+  - On match: immediately trigger Guard response
+
+--- Vector 2: Status Effect Polling (BACKUP) ---
+
+If Marksman's Spite applies any status effect/debuff to the target during
+the delay window (even a brief one), we can detect it by polling our own
+status effect list.
+
+  - Poll local player's status list on Framework.Update (every frame)
+  - Check for any status with name matching "Marksman's Spite" or similar
+  - Advantage: very simple, no hooks needed
+  - Disadvantage: may not exist -- research did not confirm a debuff
+
+This needs in-game verification. If there IS a debuff, this is the simplest
+and most stable detection method. If there isn't, Vector 1 is primary.
+
+To check in-game:
+  1. Enter a PvP match
+  2. Have a friend play MCH and use Marksman's Spite on you
+  3. Watch your debuff bar during the ~1.75s delay
+  4. If a status icon appears, note its name and ID
+
+--- Vector 3: Target + Job Detection (EARLY WARNING) ---
+
+Poll IObjectTable for any MCH player who is targeting you. This doesn't
+tell you they're USING Spite, but it tells you a MCH is looking at you.
+
+  - Iterate ObjectTable for PlayerCharacter objects
+  - Check: obj.TargetObjectId == localPlayer.ObjectId
+  - Check: obj's ClassJob == Machinist
+  - If both true: MCH is targeting you (heightened alert)
+
+This alone isn't enough to trigger Guard (you'd waste Guard every time a
+MCH looks at you). But combined with Vector 1 or 2, it gives advance
+warning and can be used for:
+  - UI indicator: "MCH targeting you!"
+  - Pre-positioning Guard on your action bar mentally
+  - Logging/alerting
+
+Could also check if the MCH has a full LB gauge (if that state is exposed
+through FFXIVClientStructs), which would make the warning much more
+actionable.
+
+==============================================================================
+RESPONSE STRATEGY
+==============================================================================
+
+When detection triggers (any vector confirms Marksman's Spite incoming):
+
+  Step 1: Cancel current action
+    - If we're casting, cancel the cast
+    - If we're in animation lock, we may be stuck (edge case)
+    - Use the game's cancel cast function pointer or macro equivalent
+
+  Step 2: Use Guard immediately
+    - Call ActionManager.Instance()->UseAction(ActionType.Action, guardActionId, localPlayerId)
+    - This is a direct FFXIVClientStructs call, same as WrathCombo's auto-rotation
+    - Guard is instant, so it should resolve immediately
+
+  Step 3: Log the event
+    - Chat message: "[AutoReact] Marksman's Spite detected! Guard activated."
+    - Optional: sound alert
+    - Optional: track how many times we've been saved
+
+--- Edge Cases ---
+
+  Guard on cooldown:
+    If Guard is on CD when Spite is detected, we can't save ourselves.
+    Log a warning: "[AutoReact] Spite incoming but Guard is on cooldown!"
+    Optionally: use Recuperate or any other available defensive.
+
+  Already Guarding:
+    If we're already in Guard, do nothing (we're already protected).
+
+  Animation lock:
+    If we're locked in another action's animation, we may not be able to
+    cancel in time. Guard is instant but action queue rules still apply.
+    Best-effort: queue Guard as next action.
+
+  Not in PvP:
+    Plugin should be completely inert outside PvP instances.
+    Check IClientState.IsPvP or territory type.
+
+  Dead:
+    Don't try to Guard if we're dead.
+
+==============================================================================
+TECHNICAL IMPLEMENTATION DETAILS
+==============================================================================
+
+--- Action IDs (Must Verify In-Game) ---
+
+  Marksman's Spite (PvP):  Need to look up in Lumina Action sheet
+                            Filter: Name == "Marksman's Spite", PvP == true
+                            Or hardcode after verification
+
+  Guard (PvP):              Need to look up in Lumina Action sheet
+                            Filter: Name == "Guard", PvP == true
+                            Or hardcode after verification
+
+  These IDs can be resolved at plugin load time via IDataManager:
+
+    var actionSheet = DataManager.GetExcelSheet<Lumina.Excel.Sheets.Action>();
+    foreach (var row in actionSheet)
+    {
+        if (row.Name == "Marksman's Spite" && row.IsPvP)
+            MarksmanSpiteActionId = row.RowId;
+        if (row.Name == "Guard" && row.IsPvP)
+            GuardActionId = row.RowId;
+    }
+
+--- ReceiveActionEffect Hook ---
+
+This is the most complex part. The hook signature comes from
+FFXIVClientStructs or community signatures (WrathCombo, BossMod, etc.).
+
+  delegate void ReceiveActionEffectDelegate(
+      uint sourceId,        // who used the action
+      Character* sourceChar,
+      IntPtr pos,
+      EffectHeader* header, // contains actionId
+      EffectEntry* effects,
+      ulong* targetObjectIds
+  );
+
+  In the detour:
+    1. Read header->ActionId
+    2. If ActionId != MarksmanSpiteActionId, return (call original)
+    3. Iterate targetObjectIds
+    4. If any targetObjectId == localPlayer.ObjectId, trigger Guard
+
+  The exact signature and struct layout should be cross-referenced with
+  WrathCombo's ActionWatching.cs at build time.
+
+--- Cancel Cast ---
+
+To cancel a current cast before using Guard:
+
+  Option A: Direct function call
+    var cancelCast = (delegate* unmanaged<void>)cancelCastAddress;
+    cancelCast();
+
+  Option B: ActionManager
+    ActionManager.Instance()->CancelCast();  // if available in FFXIVClientStructs
+
+  Option C: Let Guard handle it
+    Guard might naturally cancel a cast when used (needs testing).
+    Since Guard is an ability (not a spell), it should be usable during
+    most states. But if we're mid-cast of a spell, the cast needs to
+    cancel first.
+
+--- Guard Cooldown Check ---
+
+Before attempting to use Guard, check if it's available:
+
+  unsafe
+  {
+      var am = ActionManager.Instance();
+      var recast = am->GetRecastGroupDetail(guardRecastGroup);
+      bool guardReady = recast->IsActive == 0; // 0 = ready, 1 = on CD
+
+      // Alternative: check adjusted recast time
+      float remaining = am->GetRecastTimeElapsed(guardRecastGroup);
+      float total = am->GetRecastTime(guardRecastGroup);
+      bool ready = remaining >= total || total == 0;
+  }
+
+==============================================================================
+DALAMUD SERVICES REQUIRED
+==============================================================================
+
+  Service                  Purpose
+  ──────────────────────────────────────────────────────
+  IObjectTable             LocalPlayer game object, nearby player iteration
+  IPlayerState             Local player character data (job, name)
+  IFramework               Per-frame update loop (status polling, early warning)
+  IGameInteropProvider     ReceiveActionEffect hook
+  IDataManager             Lumina Action sheet for ID resolution
+  ICondition               Check if in PvP, alive, etc.
+  IClientState             Login state, territory/PvP detection
+  ICommandManager          /autoreact command registration
+  IChatGui                 Chat output for alerts
+  IPluginLog               Logging to dalamud.log
+  IDalamudPluginInterface  Config persistence, UI builder
+
+==============================================================================
+FILE STRUCTURE
+==============================================================================
+
+  devPlugins/AutoReactFFXIV/
+  ├── AutoReactFFXIV.json           Plugin manifest
+  ├── AUTO_REACT_DETAILS.txt        This design document
+  └── src/
+      ├── AutoReactFFXIV.csproj     Build configuration
+      ├── Plugin.cs                 Entry point (IDalamudPlugin)
+      ├── Configuration.cs          Settings (enable/disable, sound, etc.)
+      ├── SpiteDetector.cs          ReceiveActionEffect hook + status polling
+      ├── GuardExecutor.cs          Cancel cast + fire Guard logic
+      └── UI/
+          └── MainWindow.cs         Status display, enable toggle, log
+
+==============================================================================
+CONFIGURATION OPTIONS
+==============================================================================
+
+  [Serializable]
+  public sealed class Configuration : IPluginConfiguration
+  {
+      public int Version { get; set; } = 1;
+
+      // Master toggle
+      public bool Enabled { get; set; } = true;
+
+      // Auto-Guard when Marksman's Spite detected
+      public bool AutoGuard { get; set; } = true;
+
+      // Chat alert even if Guard is on cooldown
+      public bool AlertOnCooldown { get; set; } = true;
+
+      // Sound alert
+      public bool PlaySound { get; set; } = true;
+
+      // Early warning: alert when MCH targets you
+      public bool WarnOnMchTarget { get; set; } = true;
+
+      // Stats tracking
+      public int TimesGuarded { get; set; } = 0;
+      public int TimesDetected { get; set; } = 0;
+  }
+
+==============================================================================
+IMPLEMENTATION PHASES
+==============================================================================
+
+Phase 1: Detection Only
+  - Plugin skeleton with all services
+  - Resolve Marksman's Spite and Guard action IDs from Lumina
+  - ReceiveActionEffect hook to detect Spite targeting us
+  - Chat alert: "[AutoReact] Marksman's Spite incoming!"
+  - MCH targeting early warning (ObjectTable polling)
+  - PvP-only activation check
+  - No auto-Guard yet, just alerts
+
+Phase 2: Auto-Guard
+  - Cancel current cast on detection
+  - ActionManager->UseAction(Guard) automatically
+  - Guard cooldown check before attempting
+  - "Guard on cooldown" warning if unavailable
+  - Stats tracking (times saved)
+  - ImGui window with status + log
+
+Phase 3: Polish
+  - Sound alerts
+  - Configurable enable/disable per feature
+  - In-game verification of action IDs and timing
+  - Edge case handling (animation lock, already guarding, dead)
+  - Performance profiling
+
+==============================================================================
+KNOWN UNKNOWNS (VERIFY IN-GAME)
+==============================================================================
+
+  1. Does Marksman's Spite place a debuff/status on the target?
+     - Web research says NO, but player memory says maybe
+     - Must test in PvP with a friend on MCH
+     - If yes: simplest detection method (poll status list)
+     - If no: ReceiveActionEffect hook is primary
+
+  2. Exact action IDs for Marksman's Spite (PvP) and Guard (PvP)
+     - Resolve at runtime via Lumina, but verify manually too
+     - PvP actions may have different IDs than PvE versions
+
+  3. Exact delay between Spite activation and damage resolution
+     - Was ~1.75s, but Patch 7.16 shortened it
+     - Need current timing to know our actual reaction window
+
+  4. Can Guard be used during animation lock of another ability?
+     - Guard is instant, but action queue rules may prevent it
+     - If not: we need to cancel + wait for lock to end + Guard
+     - This could eat into our reaction window
+
+  5. Does using Guard while casting automatically cancel the cast?
+     - If yes: we don't need a separate cancel step
+     - If no: we need to cancel first, then Guard
+
+  6. Is the ReceiveActionEffect hook fast enough?
+     - The hook fires when the client processes the packet
+     - Should be near-instant, well within the ~1.75s window
+     - But network latency, frame timing, and processing could add delay
+
+  7. Is MCH LB gauge state readable via FFXIVClientStructs?
+     - If yes: early warning could be "MCH targeting you WITH FULL LB"
+     - Much more actionable than just "MCH targeting you"
+
+==============================================================================
+RISK ASSESSMENT
+==============================================================================
+
+  ToS Risk:
+    This plugin automatically uses Guard for the player. This is ability
+    automation and violates FFXIV Terms of Service. Same category as
+    WrathCombo's auto-rotation. Use at your own risk. For personal use only.
+
+  Detection Risk:
+    SE cannot easily detect client-side plugins that don't modify network
+    packets. This plugin only reads incoming data and calls existing game
+    functions. Same risk profile as WrathCombo, Artisan, etc.
+
+  Stability Risk:
+    - ReceiveActionEffect hook signature may change with Dalamud updates
+    - Action IDs are stable (Lumina-based), low risk
+    - Guard/cancel interactions need in-game testing
+    - PvP balance patches could change Spite's timing or Guard's behavior
+
+  Performance Risk:
+    - One hook callback when ANY action fires (fast filter by action ID)
+    - ObjectTable polling for MCH targeting (same as PeepingTom, negligible)
+    - Total overhead: near zero
+
+==============================================================================
+REFERENCE PLUGINS STUDIED
+==============================================================================
+
+  PeepingTom (https://github.com/thakyZ/PeepingTom)
+    - Target detection via ObjectTable TargetObjectId polling
+    - Framework.Update with throttled Stopwatch
+    - Diff-based new/stopped targeter detection
+    - Used for: Vector 3 (MCH targeting early warning)
+
+  WrathCombo (https://github.com/PunishXIV/WrathCombo)
+    - ReceiveActionEffect hook for tracking incoming actions
+    - ActionManager->UseAction() for direct ability execution
+    - GetAdjustedActionId hook for action replacement
+    - Cooldown checking via RecastDetail structs
+    - Used for: Vector 1 (action detection) + Guard execution
+
+  ReAction (https://github.com/UnknownX7/ReAction)
+    - NOT useful for detecting other players' actions
+    - Only hooks local player's GetAdjustedActionId
+    - Confirmed: does not read network or other players' casts
+    - Learned: function hooking patterns via Hypostasis library
+
+==============================================================================
+END OF DOCUMENT
+==============================================================================

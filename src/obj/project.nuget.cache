@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "dgSpecHash": "IadgBf/BHAU=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\trist\\AppData\\Roaming\\XIVLauncher\\devPlugins\\AutoReactFFXIV\\src\\AutoReactFFXIV.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\trist\\.nuget\\packages\\microsoft.netcore.app.ref\\10.0.2\\microsoft.netcore.app.ref.10.0.2.nupkg.sha512",
+    "C:\\Users\\trist\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\10.0.2\\microsoft.windowsdesktop.app.ref.10.0.2.nupkg.sha512",
+    "C:\\Users\\trist\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\10.0.2\\microsoft.aspnetcore.app.ref.10.0.2.nupkg.sha512"
+  ],
+  "logs": []
+}
