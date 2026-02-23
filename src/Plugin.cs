@@ -109,6 +109,7 @@ public sealed class Plugin : IDalamudPlugin
 
         PluginInterface.UiBuilder.Draw += DrawUI;
         PluginInterface.UiBuilder.OpenMainUi += OnOpenMainUi;
+        PluginInterface.UiBuilder.OpenConfigUi += OnOpenMainUi;
         Framework.Update += OnFrameworkUpdate;
 
         Log.Info($"AutoReactFFXIV loaded. Spite ID={marksmanSpiteActionId}, Guard ID={guardActionId}, Bravery ID={braveryActionId}");
@@ -119,6 +120,7 @@ public sealed class Plugin : IDalamudPlugin
         Framework.Update -= OnFrameworkUpdate;
         PluginInterface.UiBuilder.Draw -= DrawUI;
         PluginInterface.UiBuilder.OpenMainUi -= OnOpenMainUi;
+        PluginInterface.UiBuilder.OpenConfigUi -= OnOpenMainUi;
         CommandManager.RemoveHandler(CommandName);
 
         spiteDetector.OnSpiteDetected -= OnSpiteDetected;
