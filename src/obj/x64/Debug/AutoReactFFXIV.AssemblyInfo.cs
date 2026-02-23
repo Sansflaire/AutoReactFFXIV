@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("AutoReactFFXIV")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("0.3.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.3.0+ff33d16be75b43f0043e7a770b3828950208d042")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("0.3.0+9129dd0b8459474a81d3935dcd877c763379cf37")]
 [assembly: System.Reflection.AssemblyProductAttribute("AutoReactFFXIV")]
 [assembly: System.Reflection.AssemblyTitleAttribute("AutoReactFFXIV")]
 [assembly: System.Reflection.AssemblyVersionAttribute("0.3.0.0")]
