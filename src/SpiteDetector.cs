@@ -35,6 +35,12 @@ public sealed class SpiteDetector : IDisposable
     // Set to the Guard action ID to enable Guard-use detection
     public uint GuardActionId { get; set; } = 0;
 
+    // Monk: Meteodrive PvP LB action ID
+    public uint MeteodriveActionId { get; set; } = 0;
+
+    // Monk: single entity to watch for Meteodrive usage (the player directly above us in the host list)
+    public uint MonkWatchedEntityId { get; set; } = 0;
+
     // Dedup: suppress duplicate OnSpiteHitTargets if same caster fires within 500ms
     // (game can send 2 effect packets for one Spite cast — damage + secondary effects)
     private readonly System.Collections.Generic.Dictionary<uint, DateTime> lastSpitePacketTime
@@ -45,6 +51,9 @@ public sealed class SpiteDetector : IDisposable
 
     // Fired when the host player uses Marksman's Spite; arg is the first target's EntityId
     public event Action<uint>? OnHostFiredSpite;
+
+    // Monk: fired when the watched entity uses Meteodrive; args: casterEntityId, firstTargetEntityId
+    public event Action<uint, uint>? OnWatchedHostUsedMeteodrive;
 
     // Fired when the host player uses Bravery
     public event Action? OnHostUsedBravery;
@@ -143,6 +152,17 @@ public sealed class SpiteDetector : IDisposable
             {
                 log.Info("SpiteDetector: Host used Bravery!");
                 OnHostUsedBravery?.Invoke();
+            }
+
+            // Monk: detect when our watched host uses Meteodrive
+            if (MeteodriveActionId != 0 && MonkWatchedEntityId != 0
+                && header->ActionId == MeteodriveActionId
+                && casterEntityId == MonkWatchedEntityId
+                && header->NumTargets > 0)
+            {
+                var firstTarget = targetEntityIds[0].ObjectId;
+                log.Info($"SpiteDetector: Watched host used Meteodrive! Target={firstTarget}");
+                OnWatchedHostUsedMeteodrive?.Invoke(casterEntityId, firstTarget);
             }
         }
         catch (Exception ex)

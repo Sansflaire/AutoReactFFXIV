@@ -52,15 +52,18 @@ public sealed class Plugin : IDalamudPlugin
     private SpiteDetector spiteDetector;
     private GuardExecutor guardExecutor;
     private ExecuteEngine executeEngine;
+    private MeteodriveEngine meteodriveEngine = null!;
 
     // Resolved action IDs
     private uint marksmanSpiteActionId = 0;
     private uint guardActionId = 0;
     private uint braveryActionId = 0;
     private uint guardStatusId = 0;
+    private uint meteodriveActionId = 0;
 
-    // ClassJob ID for Machinist
+    // ClassJob IDs
     private const uint MchClassJobId = 31;
+    private const uint MnkClassJobId = 20;
 
 
     // -----------------------------------------------------------------------
@@ -88,6 +91,7 @@ public sealed class Plugin : IDalamudPlugin
     private bool executeSpiteReady = false;
     private bool executeBraveryReady = false;
     private bool executeIsLocalMch = false;
+    private bool executeIsLocalMnk = false;
     private string executeLastMessage = string.Empty;
     private DateTime executeLastMessageTime = DateTime.MinValue;
 
@@ -95,6 +99,16 @@ public sealed class Plugin : IDalamudPlugin
     private ulong pendingFireGameObjectId = 0;
     private DateTime pendingFireExpiry = DateTime.MinValue;
     private const double PendingFireTimeoutMs = 1200.0;
+
+    // -----------------------------------------------------------------------
+    // Monk Meteodrive chain state
+    // -----------------------------------------------------------------------
+    // Debuff lasts 3s; we fire 400ms before it expires for seamless chaining
+    private const double MeteodriveChainDelayMs = 2600.0;
+    private ulong mnkPendingTargetId = 0;
+    private DateTime mnkPendingFireTime = DateTime.MinValue;
+    private string mnkChainStatus = "Idle";
+    private string mnkHostAddBuffer = string.Empty;
 
     // -----------------------------------------------------------------------
     // SIGHT tab state (updated each frame poll)
@@ -183,15 +197,20 @@ public sealed class Plugin : IDalamudPlugin
         executeEngine.MarksmanSpiteActionId = marksmanSpiteActionId;
         executeEngine.BraveryActionId = braveryActionId;
 
+        meteodriveEngine = new MeteodriveEngine(Log, TargetManager);
+        meteodriveEngine.MeteodriveActionId = meteodriveActionId;
+
         spiteDetector = new SpiteDetector(GameInteropProvider, Log, ObjectTable);
         spiteDetector.MarksmanSpiteActionId = marksmanSpiteActionId;
         spiteDetector.BraveryActionId = braveryActionId;
         spiteDetector.GuardActionId = guardActionId;
+        spiteDetector.MeteodriveActionId = meteodriveActionId;
         spiteDetector.OnSpiteDetected += OnSpiteDetected;
         spiteDetector.OnHostFiredSpite += OnHostFiredSpite;
         spiteDetector.OnHostUsedBravery += OnHostUsedBravery;
         spiteDetector.OnAnyPlayerUsedGuard += OnAnyPlayerUsedGuardHandler;
         spiteDetector.OnSpiteHitTargets += OnSpiteHitTargetsHandler;
+        spiteDetector.OnWatchedHostUsedMeteodrive += OnWatchedHostUsedMeteodrive;
 
         CommandManager.AddHandler(CommandName, new CommandInfo(OnCommand)
         {
@@ -239,6 +258,7 @@ public sealed class Plugin : IDalamudPlugin
         spiteDetector.OnHostUsedBravery -= OnHostUsedBravery;
         spiteDetector.OnAnyPlayerUsedGuard -= OnAnyPlayerUsedGuardHandler;
         spiteDetector.OnSpiteHitTargets -= OnSpiteHitTargetsHandler;
+        spiteDetector.OnWatchedHostUsedMeteodrive -= OnWatchedHostUsedMeteodrive;
         spiteDetector.Dispose();
 
         PluginInterface.SavePluginConfig(config);
@@ -284,7 +304,13 @@ public sealed class Plugin : IDalamudPlugin
                 Log.Info($"Resolved Bravery PvP: ID={action.RowId}");
             }
 
-            if (marksmanSpiteActionId != 0 && guardActionId != 0 && braveryActionId != 0)
+            if (name == "Meteodrive" && meteodriveActionId == 0)
+            {
+                meteodriveActionId = action.RowId;
+                Log.Info($"Resolved Meteodrive PvP: ID={action.RowId}");
+            }
+
+            if (marksmanSpiteActionId != 0 && guardActionId != 0 && braveryActionId != 0 && meteodriveActionId != 0)
                 break;
         }
 
@@ -519,6 +545,60 @@ public sealed class Plugin : IDalamudPlugin
     }
 
     // -----------------------------------------------------------------------
+    // Monk helpers
+    // -----------------------------------------------------------------------
+
+    private void OnWatchedHostUsedMeteodrive(uint casterEntityId, uint firstTargetEntityId)
+    {
+        var delayMs = config.MonkInstantMeteodrive ? 0.0 : MeteodriveChainDelayMs;
+        mnkPendingTargetId = firstTargetEntityId;
+        mnkPendingFireTime = DateTime.Now.AddMilliseconds(delayMs);
+        mnkChainStatus = config.MonkInstantMeteodrive
+            ? "Firing immediately..."
+            : $"Firing in {MeteodriveChainDelayMs / 1000.0:F1}s...";
+        Log.Info($"Monk: host fired Meteodrive, queued fire in {delayMs}ms on target {firstTargetEntityId}");
+    }
+
+    private void UpdateMonkWatchTarget(IPlayerCharacter localPlayer)
+    {
+        spiteDetector.MonkWatchedEntityId = 0;
+
+        if (config.MonkHostList.Count == 0) return;
+        var localName = localPlayer.Name.ToString();
+        var myIndex = config.MonkHostList.IndexOf(localName);
+        if (myIndex <= 0) return; // first or not in list
+
+        var watchName = config.MonkHostList[myIndex - 1];
+        foreach (var obj in ObjectTable)
+        {
+            if (obj is IPlayerCharacter pc && pc.Name.ToString() == watchName)
+            {
+                spiteDetector.MonkWatchedEntityId = pc.EntityId;
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Called when we successfully fire Meteodrive. Adds the target to the Victims list
+    /// and marks them for kill-tracking (same window as Spite kills).
+    /// </summary>
+    private void TrackMeteodriveFire(IGameObject target)
+    {
+        if (target is not IPlayerCharacter pc) return;
+        var name = pc.Name.ToString();
+
+        // Skip allies
+        var localName = ObjectTable.LocalPlayer?.Name.ToString() ?? string.Empty;
+        if (name == localName || config.TrustedPlayers.Contains(name)) return;
+        for (int i = 0; i < PartyList.Length; i++)
+            if (PartyList[i]?.Name.ToString() == name) return;
+
+        AddVictim(name);
+        spitedRecently[name] = DateTime.Now; // reuse kill-tracking window
+    }
+
+    // -----------------------------------------------------------------------
     // Execute helpers
     // -----------------------------------------------------------------------
 
@@ -733,6 +813,40 @@ public sealed class Plugin : IDalamudPlugin
         executeSpiteReady = executeEngine.IsSpiteReady();
         executeBraveryReady = executeEngine.IsBraveryReady();
 
+        // --- Monk job state ---
+        executeIsLocalMnk = localPlayer != null && localPlayer.ClassJob.RowId == MnkClassJobId;
+        if (executeIsLocalMnk && localPlayer != null)
+            UpdateMonkWatchTarget(localPlayer);
+
+        // --- Pending Monk Meteodrive fire ---
+        if (executeIsLocalMnk && mnkPendingTargetId != 0 && DateTime.Now >= mnkPendingFireTime)
+        {
+            IGameObject? mnkTarget = null;
+            foreach (var obj in ObjectTable)
+            {
+                if (obj != null && obj.GameObjectId == mnkPendingTargetId)
+                {
+                    mnkTarget = obj;
+                    break;
+                }
+            }
+
+            if (mnkTarget != null && localPlayer != null && meteodriveEngine.IsInRange(localPlayer, mnkTarget))
+            {
+                var ok = meteodriveEngine.Fire(mnkTarget);
+                mnkChainStatus = ok ? $"Meteodrive FIRED on {mnkTarget.Name}!" : "Meteodrive fire failed.";
+                if (ok)
+                    TrackMeteodriveFire(mnkTarget);
+            }
+            else
+            {
+                mnkChainStatus = mnkTarget == null ? "Target lost — cancelled." : "Out of range — cancelled.";
+            }
+
+            mnkPendingTargetId = 0;
+            mnkPendingFireTime = DateTime.MinValue;
+        }
+
         // --- Persistent stats: Games + Kill tracking ---
         if (config.SightEnabled && sightEnemies.Count > 0)
         {
@@ -849,7 +963,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (ImGui.Begin("Auto React", ref showWindow, ImGuiWindowFlags.None))
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Auto React v0.5.7");
+            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Auto React v0.6.0");
             ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "PvP Defend & Execute");
             ImGui.Separator();
             ImGui.Spacing();
@@ -868,7 +982,7 @@ public sealed class Plugin : IDalamudPlugin
                     ImGui.EndTabItem();
                 }
 
-                if (ImGui.BeginTabItem("SIGHT"))
+                if (ImGui.BeginTabItem("Sight"))
                 {
                     DrawSightTab();
                     ImGui.EndTabItem();
@@ -880,7 +994,7 @@ public sealed class Plugin : IDalamudPlugin
                     ImGui.EndTabItem();
                 }
 
-                if (ImGui.BeginTabItem("AVOID"))
+                if (ImGui.BeginTabItem("Avoid"))
                 {
                     DrawAvoidTab();
                     ImGui.EndTabItem();
@@ -1054,141 +1168,261 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Host targeting: None");
 
         ImGui.Spacing();
+
+        // ---- Job-specific content ----
         ImGui.Separator();
         ImGui.Spacing();
 
-        // ---- FIRE! button ----
-        bool canFire = executeIsLocalMch
-            && executeHostTarget != null
-            && executeInRange
-            && executeSpiteReady
-            && !IsLbBlockedBySight();
-
-        if (canFire)
+        if (executeIsLocalMch)
         {
-            // Pulsing bright red when ready
-            float pulse = (float)(Math.Sin(DateTime.Now.TimeOfDay.TotalSeconds * 5.0) * 0.12 + 0.88);
-            ImGui.PushStyleColor(ImGuiCol.Button,        new Vector4(0.85f * pulse, 0.05f, 0.05f, 1.0f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(1.00f,         0.15f, 0.15f, 1.0f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive,  new Vector4(0.60f,         0.00f, 0.00f, 1.0f));
+            // Readiness status
+            ImGui.Text("Readiness");
+            ImGui.Indent();
+
+            // Job check
+            if (executeIsLocalMch)
+                ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Job: Machinist");
+            else
+                ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Job: NOT Machinist (MCH required)");
+
+            // Range
+            if (executeHostTarget == null)
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Range: no target");
+            else if (executeInRange)
+                ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Range: IN RANGE");
+            else
+                ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Range: OUT OF RANGE (>50y)");
+
+            // Marksman's Spite
+            if (marksmanSpiteActionId == 0)
+                ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Marksman's Spite: ID not resolved");
+            else if (executeSpiteReady)
+                ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Marksman's Spite: AVAILABLE");
+            else
+                ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Marksman's Spite: NOT AVAILABLE");
+
+            // Bravery
+            if (braveryActionId == 0)
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Bravery: NOT FOUND in game data");
+            }
+            else if (!config.AutoBravery)
+            {
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Bravery: disabled (Auto Bravery off)");
+            }
+            else if (executeBraveryReady)
+            {
+                ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Bravery: AVAILABLE");
+            }
+            else if (executeEngine.IsBraveryOffCooldown())
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), "Bravery: off CD but busy (will wait)");
+            }
+            else
+            {
+                ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), "Bravery: NOT AVAILABLE (will fire Spite anyway)");
+            }
+
+            ImGui.Unindent();
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            // Automation Options
+            var autoBravery = config.AutoBravery;
+            if (ImGui.Checkbox("Auto Bravery##ab", ref autoBravery))
+            {
+                config.AutoBravery = autoBravery;
+                PluginInterface.SavePluginConfig(config);
+            }
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "(use Bravery before LB; waits if busy)");
+
+            var syncBravery = config.SyncBraveryWithHost;
+            if (ImGui.Checkbox("Sync Bravery with Host##sb", ref syncBravery))
+            {
+                config.SyncBraveryWithHost = syncBravery;
+                PluginInterface.SavePluginConfig(config);
+            }
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "(use Bravery when host does)");
+
+            var autoMode = config.ExecuteAutoMode;
+            if (ImGui.Checkbox("Auto Mode##am", ref autoMode))
+            {
+                config.ExecuteAutoMode = autoMode;
+                PluginInterface.SavePluginConfig(config);
+            }
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "(auto-fires when host uses their LB)");
+
+            // Last action message
+            if (executeLastMessageTime != DateTime.MinValue)
+            {
+                var age = (DateTime.Now - executeLastMessageTime).TotalSeconds;
+                if (age < 15)
+                {
+                    ImGui.Spacing();
+                    bool isFired = executeLastMessage.Contains("FIRED") || executeLastMessage.Contains("Deferred") || executeLastMessage.Contains("Synced");
+                    var msgCol = isFired
+                        ? new Vector4(0.2f, 1.0f, 0.2f, 1.0f)
+                        : executeLastMessage.Contains("Waiting")
+                            ? new Vector4(1.0f, 0.8f, 0.0f, 1.0f)
+                            : new Vector4(1.0f, 0.4f, 0.4f, 1.0f);
+                    ImGui.TextColored(msgCol, executeLastMessage);
+                }
+            }
+        }
+        else if (executeIsLocalMnk)
+        {
+            DrawMonkExecuteSection();
         }
         else
         {
-            ImGui.PushStyleColor(ImGuiCol.Button,        new Vector4(0.30f, 0.10f, 0.10f, 1.0f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonHovered, new Vector4(0.35f, 0.12f, 0.12f, 1.0f));
-            ImGui.PushStyleColor(ImGuiCol.ButtonActive,  new Vector4(0.25f, 0.08f, 0.08f, 1.0f));
+            var jobAbbr = ObjectTable.LocalPlayer?.ClassJob.Value.Abbreviation.ToString() ?? "Unknown";
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), $"No options for {jobAbbr} yet.");
         }
+    }
 
-        if (ImGui.Button("  FIRE!  ", new Vector2(-1, 54)))
-        {
-            if (canFire && executeHostTarget != null)
-                TriggerFire(executeHostTarget);
-        }
+    private void DrawMonkExecuteSection()
+    {
+        var localName = ObjectTable.LocalPlayer?.Name.ToString() ?? string.Empty;
+        var myIndex = string.IsNullOrEmpty(localName) ? -1 : config.MonkHostList.IndexOf(localName);
 
-        ImGui.PopStyleColor(3);
-
+        // ---- Host List ----
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Host List");
+        ImGui.Spacing();
+        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "You auto-fire after the player directly above you uses Meteodrive.");
         ImGui.Spacing();
 
-        // ---- Readiness status ----
+        int toRemove = -1, swapA = -1, swapB = -1;
+        for (int i = 0; i < config.MonkHostList.Count; i++)
+        {
+            var entry = config.MonkHostList[i];
+            bool isMe = entry == localName;
+            bool isWatched = myIndex > 0 && i == myIndex - 1;
+
+            ImGui.BeginDisabled(i == 0);
+            if (ImGui.SmallButton($"↑##mnku{i}")) { swapA = i - 1; swapB = i; }
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            ImGui.BeginDisabled(i == config.MonkHostList.Count - 1);
+            if (ImGui.SmallButton($"↓##mnkd{i}")) { swapA = i; swapB = i + 1; }
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+
+            string label = isMe ? $"► {entry} ◄" : isWatched ? $"⟶ {entry}" : entry;
+            var col = isMe      ? new Vector4(0.4f, 0.9f, 1.0f, 1.0f)
+                    : isWatched ? new Vector4(1.0f, 0.8f, 0.2f, 1.0f)
+                                : new Vector4(1.0f, 1.0f, 1.0f, 1.0f);
+            ImGui.TextColored(col, label);
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"×##mnkx{i}")) toRemove = i;
+        }
+
+        if (toRemove >= 0) { config.MonkHostList.RemoveAt(toRemove); PluginInterface.SavePluginConfig(config); }
+        if (swapA >= 0)
+        {
+            (config.MonkHostList[swapA], config.MonkHostList[swapB]) =
+                (config.MonkHostList[swapB], config.MonkHostList[swapA]);
+            PluginInterface.SavePluginConfig(config);
+        }
+
+        ImGui.Spacing();
+        ImGui.SetNextItemWidth(160);
+        ImGui.InputText("##mnkAdd", ref mnkHostAddBuffer, 64);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Add##mnkAddBtn"))
+        {
+            var trimmed = mnkHostAddBuffer.Trim();
+            if (!string.IsNullOrEmpty(trimmed) && !config.MonkHostList.Contains(trimmed))
+            {
+                config.MonkHostList.Add(trimmed);
+                PluginInterface.SavePluginConfig(config);
+            }
+            mnkHostAddBuffer = string.Empty;
+        }
+        ImGui.SameLine();
+        if (ImGui.SmallButton("+ Me##mnkMe"))
+        {
+            if (!string.IsNullOrEmpty(localName) && !config.MonkHostList.Contains(localName))
+            {
+                config.MonkHostList.Add(localName);
+                PluginInterface.SavePluginConfig(config);
+            }
+        }
+        ImGui.SameLine();
+        if (ImGui.BeginCombo("##mnkParty", "Party"))
+        {
+            for (int i = 0; i < PartyList.Length; i++)
+            {
+                var member = PartyList[i];
+                if (member == null) continue;
+                var mName = member.Name.ToString();
+                if (ImGui.Selectable(mName) && !config.MonkHostList.Contains(mName))
+                {
+                    config.MonkHostList.Add(mName);
+                    PluginInterface.SavePluginConfig(config);
+                }
+            }
+            ImGui.EndCombo();
+        }
+
+        ImGui.Spacing();
         ImGui.Separator();
         ImGui.Spacing();
-        ImGui.Text("Readiness");
+
+        // ---- Options ----
+        var instant = config.MonkInstantMeteodrive;
+        if (ImGui.Checkbox("Instant Meteodrive##mnkInstant", ref instant))
+        {
+            config.MonkInstantMeteodrive = instant;
+            PluginInterface.SavePluginConfig(config);
+        }
+        ImGui.SameLine();
+        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "(fire immediately; skip chain timing)");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        // ---- Status ----
+        ImGui.Text("Status");
         ImGui.Indent();
 
-        // Job check
-        if (executeIsLocalMch)
-            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Job: Machinist");
+        if (myIndex < 0)
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Add yourself to the list to enable auto-fire");
+        else if (myIndex == 0)
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "You are first — you trigger the chain manually");
         else
-            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Job: NOT Machinist (MCH required)");
+        {
+            var watchName = config.MonkHostList[myIndex - 1];
+            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.2f, 1.0f), $"Watching: {watchName}");
+        }
 
-        // Range
-        if (executeHostTarget == null)
-            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Range: no target");
-        else if (executeInRange)
-            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Range: IN RANGE");
+        if (meteodriveActionId == 0)
+            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Meteodrive: ID not resolved");
+        else if (meteodriveEngine.IsMeteodriveReady())
+            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Meteodrive: READY");
         else
-            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Range: OUT OF RANGE (>50y)");
+            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Meteodrive: NOT READY");
 
-        // Marksman's Spite
-        if (marksmanSpiteActionId == 0)
-            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Marksman's Spite: ID not resolved");
-        else if (executeSpiteReady)
-            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Marksman's Spite: AVAILABLE");
-        else
-            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Marksman's Spite: NOT AVAILABLE");
-
-        // Bravery
-        if (braveryActionId == 0)
+        if (mnkPendingTargetId != 0)
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Bravery: NOT FOUND in game data");
+            var remaining = (mnkPendingFireTime - DateTime.Now).TotalSeconds;
+            var waitMsg = remaining > 0 ? $"Firing in {remaining:F1}s..." : "Firing...";
+            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), waitMsg);
         }
-        else if (!config.AutoBravery)
+        else if (!string.IsNullOrEmpty(mnkChainStatus) && mnkChainStatus != "Idle")
         {
-            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Bravery: disabled (Auto Bravery off)");
-        }
-        else if (executeBraveryReady)
-        {
-            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Bravery: AVAILABLE");
-        }
-        else if (executeEngine.IsBraveryOffCooldown())
-        {
-            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.0f, 1.0f), "Bravery: off CD but busy (will wait)");
-        }
-        else
-        {
-            ImGui.TextColored(new Vector4(1.0f, 0.5f, 0.0f, 1.0f), "Bravery: NOT AVAILABLE (will fire Spite anyway)");
+            var isSuccess = mnkChainStatus.Contains("FIRED");
+            ImGui.TextColored(
+                isSuccess ? new Vector4(0.2f, 1.0f, 0.2f, 1.0f) : new Vector4(0.5f, 0.5f, 0.5f, 1.0f),
+                mnkChainStatus);
         }
 
         ImGui.Unindent();
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // ---- Automation Options ----
-        var autoBravery = config.AutoBravery;
-        if (ImGui.Checkbox("Auto Bravery##ab", ref autoBravery))
-        {
-            config.AutoBravery = autoBravery;
-            PluginInterface.SavePluginConfig(config);
-        }
-        ImGui.SameLine();
-        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "(use Bravery before LB; waits if busy)");
-
-        var syncBravery = config.SyncBraveryWithHost;
-        if (ImGui.Checkbox("Sync Bravery with Host##sb", ref syncBravery))
-        {
-            config.SyncBraveryWithHost = syncBravery;
-            PluginInterface.SavePluginConfig(config);
-        }
-        ImGui.SameLine();
-        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "(use Bravery when host does)");
-
-        var autoMode = config.ExecuteAutoMode;
-        if (ImGui.Checkbox("Auto Mode##am", ref autoMode))
-        {
-            config.ExecuteAutoMode = autoMode;
-            PluginInterface.SavePluginConfig(config);
-        }
-        ImGui.SameLine();
-        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "(auto-fires when host uses their LB)");
-
-        // ---- Last action message ----
-        if (executeLastMessageTime != DateTime.MinValue)
-        {
-            var age = (DateTime.Now - executeLastMessageTime).TotalSeconds;
-            if (age < 15)
-            {
-                ImGui.Spacing();
-                bool isFired = executeLastMessage.Contains("FIRED") || executeLastMessage.Contains("Deferred") || executeLastMessage.Contains("Synced");
-                var msgCol = isFired
-                    ? new Vector4(0.2f, 1.0f, 0.2f, 1.0f)
-                    : executeLastMessage.Contains("Waiting")
-                        ? new Vector4(1.0f, 0.8f, 0.0f, 1.0f)
-                        : new Vector4(1.0f, 0.4f, 0.4f, 1.0f);
-                ImGui.TextColored(msgCol, executeLastMessage);
-            }
-        }
     }
 
     // -----------------------------------------------------------------------
@@ -1198,7 +1432,7 @@ public sealed class Plugin : IDalamudPlugin
     private void DrawSightTab()
     {
         var sightEnabled = config.SightEnabled;
-        if (ImGui.Checkbox("Enable SIGHT overlay##sight", ref sightEnabled))
+        if (ImGui.Checkbox("Enable Sight overlay##sight", ref sightEnabled))
         {
             config.SightEnabled = sightEnabled;
             PluginInterface.SavePluginConfig(config);
@@ -1261,7 +1495,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Visible Enemies");
         if (!config.SightEnabled)
         {
-            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "(SIGHT disabled)");
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "(Sight disabled)");
         }
         else if (sightEnemies.Count == 0)
         {
@@ -1597,7 +1831,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ImGui.Spacing();
-        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "Check a name to show a DIAMOND instead of a circle in SIGHT.");
+        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "Check a name to show a DIAMOND instead of a circle in Sight.");
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -2178,7 +2412,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawSettingsTab()
     {
-        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "SIGHT Overlay Timing");
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Sight Overlay Timing");
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -2203,7 +2437,7 @@ public sealed class Plugin : IDalamudPlugin
 
         ImGui.Spacing();
         ImGui.Spacing();
-        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "SIGHT Shapes");
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Sight Shapes");
         ImGui.Separator();
         ImGui.Spacing();
 
@@ -2253,7 +2487,7 @@ public sealed class Plugin : IDalamudPlugin
     {
         ImGui.TextColored(new Vector4(0.1f, 0.1f, 0.1f, 1.0f), "● ");
         ImGui.SameLine();
-        ImGui.TextColored(new Vector4(0.9f, 0.3f, 0.3f, 1.0f), "AVOID — Successfully guarded Marksman's Spite");
+        ImGui.TextColored(new Vector4(0.9f, 0.3f, 0.3f, 1.0f), "Avoid — Successfully guarded Marksman's Spite");
         ImGui.SameLine();
         if (ImGui.SmallButton("Clear All##clearAvoid"))
         {
@@ -2262,7 +2496,7 @@ public sealed class Plugin : IDalamudPlugin
         }
 
         ImGui.Spacing();
-        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "These players guarded when hit by Spite. BLACK circle in SIGHT, overrides all.");
+        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "These players guarded when hit by Spite. BLACK circle in Sight, overrides all.");
         ImGui.Separator();
         ImGui.Spacing();
 

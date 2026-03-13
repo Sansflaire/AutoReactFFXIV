@@ -47,6 +47,10 @@ public sealed class Configuration : IPluginConfiguration
     public bool AutoBravery { get; set; } = true;
     public bool SyncBraveryWithHost { get; set; } = false;
 
+    // Monk Execute tab
+    public List<string> MonkHostList { get; set; } = new List<string>();
+    public bool MonkInstantMeteodrive { get; set; } = false;
+
     // SIGHT tab
     public bool SightEnabled { get; set; } = false;
     public bool SightBlockLbOnRed { get; set; } = true;
