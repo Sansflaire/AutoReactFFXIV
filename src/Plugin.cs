@@ -105,8 +105,10 @@ public sealed class Plugin : IDalamudPlugin
     // -----------------------------------------------------------------------
     // Debuff lasts 3s; we fire 400ms before it expires for seamless chaining
     private const double MeteodriveChainDelayMs = 2600.0;
+    private const double MnkRetryWindowMs = 600.0;
     private ulong mnkPendingTargetId = 0;
     private DateTime mnkPendingFireTime = DateTime.MinValue;
+    private DateTime mnkRetryExpiry = DateTime.MinValue;
     private string mnkChainStatus = "Idle";
     private string mnkHostAddBuffer = string.Empty;
 
@@ -600,6 +602,7 @@ public sealed class Plugin : IDalamudPlugin
         var delayMs = config.MonkInstantMeteodrive ? 0.0 : MeteodriveChainDelayMs;
         mnkPendingTargetId = firstTargetEntityId;
         mnkPendingFireTime = DateTime.Now.AddMilliseconds(delayMs);
+        mnkRetryExpiry = DateTime.MinValue;
         mnkChainStatus = config.MonkInstantMeteodrive
             ? "Firing immediately..."
             : $"Firing in {MeteodriveChainDelayMs / 1000.0:F1}s...";
@@ -866,32 +869,65 @@ public sealed class Plugin : IDalamudPlugin
             UpdateMonkWatchTarget(localPlayer);
 
         // --- Pending Monk Meteodrive fire ---
-        if (executeIsLocalMnk && mnkPendingTargetId != 0 && DateTime.Now >= mnkPendingFireTime)
+        if (executeIsLocalMnk && mnkPendingTargetId != 0)
         {
+            // Resolve target each tick so we always have a fresh reference
             IGameObject? mnkTarget = null;
             foreach (var obj in ObjectTable)
             {
                 if (obj != null && obj.GameObjectId == mnkPendingTargetId)
-                {
-                    mnkTarget = obj;
-                    break;
-                }
+                { mnkTarget = obj; break; }
             }
 
-            if (mnkTarget != null && localPlayer != null && meteodriveEngine.IsInRange(localPlayer, mnkTarget))
+            if (mnkTarget == null)
             {
-                var ok = meteodriveEngine.Fire(mnkTarget);
-                mnkChainStatus = ok ? $"Meteodrive FIRED on {mnkTarget.Name}!" : "Meteodrive fire failed.";
-                if (ok)
-                    TrackMeteodriveFire(mnkTarget);
+                // Target left the scene — give up immediately
+                mnkChainStatus = "Target lost — cancelled.";
+                mnkPendingTargetId = 0;
+                mnkPendingFireTime = DateTime.MinValue;
+                mnkRetryExpiry = DateTime.MinValue;
+            }
+            else if (DateTime.Now < mnkPendingFireTime)
+            {
+                // Still in countdown — pre-set hard target so the game sees it before we fire
+                TargetManager.Target = mnkTarget;
             }
             else
             {
-                mnkChainStatus = mnkTarget == null ? "Target lost — cancelled." : "Out of range — cancelled.";
-            }
+                // Fire window: attempt fire (and retry if needed)
+                if (mnkRetryExpiry == DateTime.MinValue)
+                    mnkRetryExpiry = DateTime.Now.AddMilliseconds(MnkRetryWindowMs);
 
-            mnkPendingTargetId = 0;
-            mnkPendingFireTime = DateTime.MinValue;
+                if (DateTime.Now > mnkRetryExpiry)
+                {
+                    // Retry window expired — give up
+                    mnkChainStatus = "Meteodrive fire failed.";
+                    mnkPendingTargetId = 0;
+                    mnkPendingFireTime = DateTime.MinValue;
+                    mnkRetryExpiry = DateTime.MinValue;
+                }
+                else if (localPlayer != null && meteodriveEngine.IsInRange(localPlayer, mnkTarget))
+                {
+                    var ok = meteodriveEngine.Fire(mnkTarget);
+                    if (ok)
+                    {
+                        mnkChainStatus = $"Meteodrive FIRED on {mnkTarget.Name}!";
+                        TrackMeteodriveFire(mnkTarget);
+                        mnkPendingTargetId = 0;
+                        mnkPendingFireTime = DateTime.MinValue;
+                        mnkRetryExpiry = DateTime.MinValue;
+                    }
+                    else
+                    {
+                        mnkChainStatus = "Retrying...";
+                    }
+                }
+                else
+                {
+                    // Out of range — keep retrying (player might be moving into range)
+                    mnkChainStatus = "Out of range — retrying...";
+                }
+            }
         }
 
         // --- Persistent stats: Games + Kill tracking ---
@@ -1010,7 +1046,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (ImGui.Begin("Auto React", ref showWindow, ImGuiWindowFlags.None))
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Auto React v0.6.1");
+            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Auto React v0.6.2");
             ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "PvP Defend & Execute");
             ImGui.Separator();
             ImGui.Spacing();
@@ -1437,9 +1473,9 @@ public sealed class Plugin : IDalamudPlugin
         if (meteodriveActionId == 0)
             ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Meteodrive: ID not resolved");
         else if (meteodriveEngine.IsMeteodriveReady())
-            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), "Meteodrive: READY");
+            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), $"Meteodrive: READY (ID {meteodriveActionId})");
         else
-            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), "Meteodrive: NOT READY");
+            ImGui.TextColored(new Vector4(1.0f, 0.3f, 0.3f, 1.0f), $"Meteodrive: NOT READY (ID {meteodriveActionId})");
 
         if (mnkPendingTargetId != 0)
         {

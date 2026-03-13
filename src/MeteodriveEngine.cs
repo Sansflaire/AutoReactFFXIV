@@ -49,9 +49,11 @@ public sealed class MeteodriveEngine
         if (MeteodriveActionId == 0) return false;
         var am = ActionManager.Instance();
         if (am == null) return false;
+        // Set hard target, then pass the raw entity ID (uint cast to ulong).
+        // GameObjectId is Dalamud's composite ulong and may differ from the game's entity ID.
         targetManager.Target = target;
-        var result = am->UseAction(ActionType.Action, MeteodriveActionId, target.GameObjectId);
-        log.Info($"MeteodriveEngine: Fire on {target.Name} = {result}");
+        var result = am->UseAction(ActionType.Action, MeteodriveActionId, (ulong)target.EntityId);
+        log.Info($"MeteodriveEngine: Fire on {target.Name} EntityId={target.EntityId} = {result}");
         return result;
     }
 }
