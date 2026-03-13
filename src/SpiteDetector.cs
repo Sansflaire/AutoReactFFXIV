@@ -41,11 +41,15 @@ public sealed class SpiteDetector : IDisposable
     // Monk: single entity to watch for Meteodrive usage (the player directly above us in the host list)
     public uint MonkWatchedEntityId { get; set; } = 0;
 
-    // Dedup: suppress duplicate OnSpiteHitTargets if same caster fires within 500ms
-    // (game can send 2 effect packets for one Spite cast — damage + secondary effects)
+    // Dedup: suppress duplicate packets if same caster fires within 500ms
+    // (game can send 2 effect packets for one cast — damage + secondary effects)
     private readonly System.Collections.Generic.Dictionary<uint, DateTime> lastSpitePacketTime
         = new System.Collections.Generic.Dictionary<uint, DateTime>();
+    private readonly System.Collections.Generic.Dictionary<uint, DateTime> lastMeteodrivePacketTime
+        = new System.Collections.Generic.Dictionary<uint, DateTime>();
     private const double SpitePacketDedupMs = 500.0;
+    // Meteodrive has follow-up effect ticks up to ~3s after the initial hit; use a longer window
+    private const double MeteodrivePacketDedupMs = 5000.0;
 
     public event Action? OnSpiteDetected;
 
@@ -160,9 +164,17 @@ public sealed class SpiteDetector : IDisposable
                 && casterEntityId == MonkWatchedEntityId
                 && header->NumTargets > 0)
             {
-                var firstTarget = targetEntityIds[0].ObjectId;
-                log.Info($"SpiteDetector: Watched host used Meteodrive! Target={firstTarget}");
-                OnWatchedHostUsedMeteodrive?.Invoke(casterEntityId, firstTarget);
+                var now2 = DateTime.Now;
+                bool isDupMeteodrive = lastMeteodrivePacketTime.TryGetValue(casterEntityId, out var lastMT)
+                    && (now2 - lastMT).TotalMilliseconds < MeteodrivePacketDedupMs;
+                lastMeteodrivePacketTime[casterEntityId] = now2;
+
+                if (!isDupMeteodrive)
+                {
+                    var firstTarget = targetEntityIds[0].ObjectId;
+                    log.Info($"SpiteDetector: Watched host used Meteodrive! Target={firstTarget}");
+                    OnWatchedHostUsedMeteodrive?.Invoke(casterEntityId, firstTarget);
+                }
             }
         }
         catch (Exception ex)
