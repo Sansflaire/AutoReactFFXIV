@@ -12,7 +12,7 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AssemblyName>AutoReactFFXIV</AssemblyName>
     <RootNamespace>AutoReactFFXIV</RootNamespace>
-    <Version>0.6.0</Version>
+    <Version>0.6.1</Version>
   </PropertyGroup>
 
   <PropertyGroup>

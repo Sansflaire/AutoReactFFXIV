@@ -55,7 +55,6 @@ public sealed class Configuration : IPluginConfiguration
     public bool SightEnabled { get; set; } = false;
     public bool SightBlockLbOnRed { get; set; } = true;
     public bool SightBlockLbOnYellow { get; set; } = false;
-    public List<uint> SightDamageReducingBuffIds { get; set; } = new List<uint>();
     public bool SightShowLbStars { get; set; } = true;
 
     // Settings tab

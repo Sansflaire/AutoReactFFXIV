@@ -115,6 +115,32 @@ public sealed class Plugin : IDalamudPlugin
     // -----------------------------------------------------------------------
     private List<EnemySightData> sightEnemies = new List<EnemySightData>();
     private uint limitBreakReadyStatusId = 0;
+    private HashSet<uint> damageReducingBuffStatusIds = new HashSet<uint>();
+
+    // Damage-reducing buff names to detect for SIGHT yellow coloring.
+    // Searched in the Lumina Status sheet at startup; both "Name" and "Name Effect" forms are tried.
+    private static readonly string[] DamageReducingBuffNames =
+    {
+        "Shield Oath Effect",
+        "Salted Earth Effect",
+        "Heart of Corundum Effect",
+        "Catharsis of Corundum Effect",
+        "Catalyze Effect",
+        "Galvanize Effect",
+        "Desperate Measures Effect",
+        "Protect Effect",
+        "Doton Effect",
+        "Hissatsu: Chiten Effect",
+        "Hardened Scales Effect",
+        "Warden's Grace Effect",
+        "Fan Dance Effect",
+        "Wreath of Ice Effect",
+        "Radiant Aegis Effect",
+        "Forte Effect",
+        "Rampart Effect",
+        "Bravery Effect",
+        "Holy Sheltron Effect",
+    };
     private List<Vector3> partyMchLbReadyPositions = new List<Vector3>();
 
     // Black circle: players who used Guard recently (entityId → time of use)
@@ -364,6 +390,27 @@ public sealed class Plugin : IDalamudPlugin
         }
         if (limitBreakReadyStatusId == 0) Log.Warning("Could not resolve LB ready status ID — party MCH LB stars disabled.");
         else Log.Info($"Using LB ready status ID={limitBreakReadyStatusId}.");
+
+        // Resolve damage-reducing buff status IDs for SIGHT yellow coloring.
+        // Try both the exact name (e.g. "Galvanize Effect") and the form without " Effect" suffix.
+        if (statusSheet != null)
+        {
+            var nameSet = new System.Collections.Generic.HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (var n in DamageReducingBuffNames)
+            {
+                nameSet.Add(n);
+                if (n.EndsWith(" Effect", System.StringComparison.OrdinalIgnoreCase))
+                    nameSet.Add(n[..^" Effect".Length]);
+                else
+                    nameSet.Add(n + " Effect");
+            }
+            foreach (var status in statusSheet)
+            {
+                if (nameSet.Contains(status.Name.ToString()))
+                    damageReducingBuffStatusIds.Add(status.RowId);
+            }
+            Log.Info($"Resolved {damageReducingBuffStatusIds.Count} damage-reducing buff status IDs for SIGHT yellow.");
+        }
 
         // Build set of PvP territory IDs from ContentFinderCondition sheet
         try
@@ -963,7 +1010,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (ImGui.Begin("Auto React", ref showWindow, ImGuiWindowFlags.None))
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Auto React v0.6.0");
+            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Auto React v0.6.1");
             ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "PvP Defend & Execute");
             ImGui.Separator();
             ImGui.Spacing();
@@ -1105,76 +1152,62 @@ public sealed class Plugin : IDalamudPlugin
 
     private void DrawExecuteTab()
     {
-        // ---- Host Setup ----
-        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Host Setup");
-        ImGui.Separator();
-        ImGui.Spacing();
-
-        // Text input for host name
-        var hostBuf = config.HostPlayerName;
-        ImGui.SetNextItemWidth(200);
-        if (ImGui.InputText("##HostNameInput", ref hostBuf, 64))
-        {
-            config.HostPlayerName = hostBuf;
-            PluginInterface.SavePluginConfig(config);
-        }
-        ImGui.SameLine();
-        if (ImGui.Button("Clear##ClearHost"))
-        {
-            config.HostPlayerName = string.Empty;
-            PluginInterface.SavePluginConfig(config);
-        }
-        ImGui.SameLine();
-
-        // Party member picker combo
-        if (ImGui.BeginCombo("##PartyPick", "Party"))
-        {
-            var localName = ObjectTable.LocalPlayer?.Name.ToString() ?? string.Empty;
-            for (int i = 0; i < PartyList.Length; i++)
-            {
-                var member = PartyList[i];
-                if (member == null) continue;
-                var memberName = member.Name.ToString();
-                if (memberName == localName) continue; // skip self
-                if (ImGui.Selectable(memberName))
-                {
-                    config.HostPlayerName = memberName;
-                    PluginInterface.SavePluginConfig(config);
-                }
-            }
-            ImGui.EndCombo();
-        }
-
-        ImGui.Spacing();
-
-        // Host status
-        if (string.IsNullOrEmpty(config.HostPlayerName))
-        {
-            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Host: not set");
-        }
-        else if (executeHost != null)
-        {
-            ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), $"Host: {executeHost.Name}  [FOUND]");
-        }
-        else
-        {
-            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), $"Host: {config.HostPlayerName}  [NOT IN RANGE]");
-        }
-
-        // Host's target
-        if (!string.IsNullOrEmpty(executeHostTargetName))
-            ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.3f, 1.0f), $"Host targeting: {executeHostTargetName}");
-        else
-            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Host targeting: None");
-
-        ImGui.Spacing();
-
-        // ---- Job-specific content ----
-        ImGui.Separator();
-        ImGui.Spacing();
-
         if (executeIsLocalMch)
         {
+            // ---- Host Setup ----
+            ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Host Setup");
+            ImGui.Separator();
+            ImGui.Spacing();
+
+            var hostBuf = config.HostPlayerName;
+            ImGui.SetNextItemWidth(200);
+            if (ImGui.InputText("##HostNameInput", ref hostBuf, 64))
+            {
+                config.HostPlayerName = hostBuf;
+                PluginInterface.SavePluginConfig(config);
+            }
+            ImGui.SameLine();
+            if (ImGui.Button("Clear##ClearHost"))
+            {
+                config.HostPlayerName = string.Empty;
+                PluginInterface.SavePluginConfig(config);
+            }
+            ImGui.SameLine();
+            if (ImGui.BeginCombo("##PartyPick", "Party"))
+            {
+                var localName = ObjectTable.LocalPlayer?.Name.ToString() ?? string.Empty;
+                for (int i = 0; i < PartyList.Length; i++)
+                {
+                    var member = PartyList[i];
+                    if (member == null) continue;
+                    var memberName = member.Name.ToString();
+                    if (memberName == localName) continue;
+                    if (ImGui.Selectable(memberName))
+                    {
+                        config.HostPlayerName = memberName;
+                        PluginInterface.SavePluginConfig(config);
+                    }
+                }
+                ImGui.EndCombo();
+            }
+
+            ImGui.Spacing();
+            if (string.IsNullOrEmpty(config.HostPlayerName))
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Host: not set");
+            else if (executeHost != null)
+                ImGui.TextColored(new Vector4(0.2f, 1.0f, 0.2f, 1.0f), $"Host: {executeHost.Name}  [FOUND]");
+            else
+                ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), $"Host: {config.HostPlayerName}  [NOT IN RANGE]");
+
+            if (!string.IsNullOrEmpty(executeHostTargetName))
+                ImGui.TextColored(new Vector4(1.0f, 0.8f, 0.3f, 1.0f), $"Host targeting: {executeHostTargetName}");
+            else
+                ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "Host targeting: None");
+
+            ImGui.Spacing();
+            ImGui.Separator();
+            ImGui.Spacing();
+
             // Readiness status
             ImGui.Text("Readiness");
             ImGui.Indent();
@@ -1524,7 +1557,7 @@ public sealed class Plugin : IDalamudPlugin
         ImGui.Indent();
         ImGui.BulletText($"Guard status ID: {(guardStatusId != 0 ? guardStatusId.ToString() : "NOT FOUND")}");
         ImGui.BulletText($"LB ready status ID: {(limitBreakReadyStatusId != 0 ? limitBreakReadyStatusId.ToString() : "NOT FOUND — stars disabled")}");
-        ImGui.BulletText($"Damage-reducing buff IDs: {config.SightDamageReducingBuffIds.Count} configured");
+        ImGui.BulletText($"Damage-reducing buff IDs: {damageReducingBuffStatusIds.Count} resolved");
 
         // Live status ID dump for party MCH members — helps identify correct LB ready status
         var localPlayerDbg = ObjectTable.LocalPlayer;
@@ -1952,10 +1985,10 @@ public sealed class Plugin : IDalamudPlugin
 
     private bool HasDamageReducingBuff(IPlayerCharacter pc)
     {
-        if (config.SightDamageReducingBuffIds.Count == 0) return false;
+        if (damageReducingBuffStatusIds.Count == 0) return false;
         foreach (var status in pc.StatusList)
         {
-            if (config.SightDamageReducingBuffIds.Contains((uint)status.StatusId))
+            if (damageReducingBuffStatusIds.Contains((uint)status.StatusId))
                 return true;
         }
         return false;
