@@ -439,8 +439,13 @@ public sealed class Plugin : IDalamudPlugin
     // Event handlers
     // -----------------------------------------------------------------------
 
+    private bool IsBanned =>
+        ObjectTable.LocalPlayer is { } lp &&
+        string.Equals(lp.Name.TextValue, "Arderian Stormsong", StringComparison.OrdinalIgnoreCase);
+
     private void OnSpiteDetected()
     {
+        if (IsBanned) return;
         config.TimesDetected++;
 
         lastDefendEvent = "Marksman's Spite DETECTED!";
@@ -480,6 +485,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnHostFiredSpite(uint targetEntityId)
     {
+        if (IsBanned) return;
         // Look up target first — needed for victim tracking regardless of auto mode
         IGameObject? target = null;
         foreach (var obj in ObjectTable)
@@ -768,6 +774,7 @@ public sealed class Plugin : IDalamudPlugin
 
     private void OnFrameworkUpdate(IFramework framework)
     {
+        if (IsBanned) return;
         var now = DateTime.Now;
 
         // SIGHT collection runs on its own configurable interval
@@ -1061,9 +1068,7 @@ public sealed class Plugin : IDalamudPlugin
 
             if (ImGui.BeginTabBar("MainTabs"))
             {
-                var localPlayer = ObjectTable.LocalPlayer;
-                bool isBanned = localPlayer != null &&
-                    string.Equals(localPlayer.Name.TextValue, "Arderian Stormsong", StringComparison.OrdinalIgnoreCase);
+                var isBanned = IsBanned;
 
                 if (ImGui.BeginTabItem("Defend"))
                 {
@@ -1594,7 +1599,8 @@ public sealed class Plugin : IDalamudPlugin
             ImGui.Indent();
             foreach (var enemy in sightEnemies)
             {
-                var col = enemy.Color switch
+                var col = enemy.IsDead ? new Vector4(0.35f, 0.35f, 0.35f, 1.0f)
+                        : enemy.Color switch
                 {
                     SightColor.Red    => new Vector4(1.0f, 0.25f, 0.25f, 1.0f),
                     SightColor.Yellow => new Vector4(1.0f, 0.8f, 0.0f, 1.0f),
@@ -1713,18 +1719,21 @@ public sealed class Plugin : IDalamudPlugin
                     }
                 }
             }
-            else if (obj.GameObjectId != localPlayer.GameObjectId && pc.IsTargetable
+            else if (obj.GameObjectId != localPlayer.GameObjectId
+                     && (pc.IsTargetable || pc.CurrentHp == 0)
                      && !allianceEntityIds.Contains(pc.EntityId)
                      && IsHostileCharacter(pc))
             {
+                bool isDead = pc.CurrentHp == 0;
                 sightEnemies.Add(new EnemySightData
                 {
                     EntityId   = pc.EntityId,
                     CurrentHp  = pc.CurrentHp,
                     Position   = pc.Position,
-                    Color      = GetSightColor(pc),
+                    Color      = isDead ? SightColor.Green : GetSightColor(pc),
                     Name       = pcName,
                     ClassJobId = pc.ClassJob.RowId,
+                    IsDead     = isDead,
                 });
             }
         }
@@ -1805,8 +1814,9 @@ public sealed class Plugin : IDalamudPlugin
                 if (!isDiamond && !config.SightShowCircles) continue;
             }
 
-            int  priority     = GetShapePriority(isAvoid, enemy.Color, isGuardingNow, isDiamond);
-            uint shapeColor   = isAvoid ? blackColor
+            int  priority     = enemy.IsDead ? -1
+                              : GetShapePriority(isAvoid, enemy.Color, isGuardingNow, isDiamond);
+            uint shapeColor   = (enemy.IsDead || isAvoid) ? blackColor
                               : isDiamond ? DiamondColor(enemy.Color, isGuardingNow)
                               :             CircleColor(enemy.Color, isGuardingNow);
 
@@ -1941,7 +1951,8 @@ public sealed class Plugin : IDalamudPlugin
             {
                 var entry    = eligible[i];
                 var sightData = sightEnemies.Find(e => e.Name == entry.Name);
-                var col = sightData.Color switch
+                var col = sightData.IsDead ? new Vector4(0.35f, 0.35f, 0.35f, 1.0f)
+                        : sightData.Color switch
                 {
                     SightColor.Red    => new Vector4(1.0f, 0.25f, 0.25f, 1.0f),
                     SightColor.Yellow => new Vector4(1.0f, 0.8f, 0.0f, 1.0f),
@@ -2740,4 +2751,5 @@ internal struct EnemySightData
     public SightColor Color;
     public string Name;
     public uint ClassJobId;
+    public bool IsDead;
 }
