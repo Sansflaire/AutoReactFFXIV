@@ -1054,7 +1054,7 @@ public sealed class Plugin : IDalamudPlugin
 
         if (ImGui.Begin("Auto React", ref showWindow, ImGuiWindowFlags.None))
         {
-            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Auto React v0.6.3");
+            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), "Auto React v0.6.4");
             ImGui.TextColored(new Vector4(0.7f, 0.7f, 0.7f, 1.0f), "PvP Defend & Execute");
             ImGui.Separator();
             ImGui.Spacing();
