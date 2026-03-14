@@ -8,7 +8,7 @@
     "Punchline": "Auto-Guard against Marksman's Spite in PvP.",
     "Description": "Detects when an enemy Machinist uses Marksman's Spite on you and automatically uses Guard. Includes an Execute tab to coordinate your own Marksman's Spite with a teammate, with optional auto-Bravery sequencing.",
     "RepoUrl": "https://github.com/Sansflaire/AutoReactFFXIV",
-    "IconUrl": "https://raw.githubusercontent.com/Sansflaire/AutoReactFFXIV/main/AutoReactIcon.png",
+    "IconUrl": "https://raw.githubusercontent.com/Sansflaire/AutoReactFFXIV/main/AutoReactIcon2.png",
     "Tags": [
       "pvp",
       "combat",
