@@ -142,6 +142,7 @@ public sealed class Plugin : IDalamudPlugin
         "Rampart Effect",
         "Bravery Effect",
         "Holy Sheltron Effect",
+        "Snow Fort Effect",
     };
     private List<Vector3> partyMchLbReadyPositions = new List<Vector3>();
 
@@ -1060,45 +1061,56 @@ public sealed class Plugin : IDalamudPlugin
 
             if (ImGui.BeginTabBar("MainTabs"))
             {
+                var localPlayer = ObjectTable.LocalPlayer;
+                bool isBanned = localPlayer != null &&
+                    string.Equals(localPlayer.Name.TextValue, "Arderian Stormsong", StringComparison.OrdinalIgnoreCase);
+
                 if (ImGui.BeginTabItem("Defend"))
                 {
-                    DrawDefendTab();
+                    if (isBanned) ImGui.TextUnformatted("Sorry pal... Not today!");
+                    else DrawDefendTab();
                     ImGui.EndTabItem();
                 }
 
                 if (ImGui.BeginTabItem("Execute"))
                 {
-                    DrawExecuteTab();
+                    if (isBanned) ImGui.TextUnformatted("Sorry pal... Not today!");
+                    else DrawExecuteTab();
                     ImGui.EndTabItem();
                 }
 
                 if (ImGui.BeginTabItem("Sight"))
                 {
-                    DrawSightTab();
+                    if (isBanned) ImGui.TextUnformatted("Sorry pal... Not today!");
+                    else DrawSightTab();
                     ImGui.EndTabItem();
                 }
 
                 if (ImGui.BeginTabItem("Victims"))
                 {
-                    DrawVictimsTab();
+                    if (isBanned) ImGui.TextUnformatted("Sorry pal... Not today!");
+                    else DrawVictimsTab();
                     ImGui.EndTabItem();
                 }
 
                 if (ImGui.BeginTabItem("Avoid"))
                 {
-                    DrawAvoidTab();
+                    if (isBanned) ImGui.TextUnformatted("Sorry pal... Not today!");
+                    else DrawAvoidTab();
                     ImGui.EndTabItem();
                 }
 
                 if (ImGui.BeginTabItem("Share"))
                 {
-                    DrawShareTab();
+                    if (isBanned) ImGui.TextUnformatted("Sorry pal... Not today!");
+                    else DrawShareTab();
                     ImGui.EndTabItem();
                 }
 
                 if (ImGui.BeginTabItem("Settings"))
                 {
-                    DrawSettingsTab();
+                    if (isBanned) ImGui.TextUnformatted("Sorry pal... Not today!");
+                    else DrawSettingsTab();
                     ImGui.EndTabItem();
                 }
 
