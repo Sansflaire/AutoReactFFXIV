@@ -39,10 +39,42 @@ jobs:
 
       - name: Package
         run: |
+          $version = "${{ steps.version.outputs.VERSION }}"
           New-Item -ItemType Directory -Force -Path dist
           Copy-Item "src/bin/x64/Release/AutoReactFFXIV.dll" -Destination dist/
-          Copy-Item "AutoReactFFXIV.json" -Destination dist/
+          # Inject AssemblyVersion into the bundled manifest. Dalamud API 15+
+          # rejects zips whose manifest is missing AssemblyVersion with
+          # "Failed to install plugin". See devPlugins/BROKEN.md.
+          $manifest = Get-Content "AutoReactFFXIV.json" | ConvertFrom-Json
+          $manifest | Add-Member -NotePropertyName AssemblyVersion -NotePropertyValue $version -Force
+          $manifest | ConvertTo-Json -Depth 10 | Set-Content dist/AutoReactFFXIV.json
+          # Sanity check before zipping
+          $shipped = Get-Content dist/AutoReactFFXIV.json | ConvertFrom-Json
+          if (-not $shipped.AssemblyVersion) {
+            Write-Error "Bundled manifest is missing AssemblyVersion — refusing to ship."
+            exit 1
+          }
+          if ($shipped.AssemblyVersion -ne $version) {
+            Write-Error "Bundled AssemblyVersion ($($shipped.AssemblyVersion)) != csproj Version ($version)."
+            exit 1
+          }
           Compress-Archive -Path dist/* -DestinationPath AutoReactFFXIV.zip -Force
+        shell: pwsh
+
+      - name: Verify bundled manifest in final zip
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead((Resolve-Path AutoReactFFXIV.zip))
+          try {
+            $entry = $zip.Entries | Where-Object { $_.Name -eq "AutoReactFFXIV.json" }
+            if (-not $entry) { throw "AutoReactFFXIV.json missing from zip" }
+            $reader = New-Object System.IO.StreamReader($entry.Open())
+            $json = $reader.ReadToEnd() | ConvertFrom-Json
+            if (-not $json.AssemblyVersion) { throw "AssemblyVersion missing in zip manifest" }
+            if (-not $json.DalamudApiLevel) { throw "DalamudApiLevel missing in zip manifest" }
+            if ($json.InternalName -ne "AutoReactFFXIV") { throw "InternalName mismatch" }
+            Write-Host "OK: zip manifest -> $($json.InternalName) v$($json.AssemblyVersion) API$($json.DalamudApiLevel)"
+          } finally { $zip.Dispose() }
         shell: pwsh
 
       - name: Update pluginmaster.json version
