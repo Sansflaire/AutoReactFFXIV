@@ -539,7 +539,7 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
-    private void OnTerritoryChanged(ushort newTerritoryTypeId)
+    private void OnTerritoryChanged(uint newTerritoryTypeId)
     {
         // Commit the "seen this game" window — clear so next game starts fresh
         if (seenThisGame.Count > 0)
@@ -2375,14 +2375,14 @@ public sealed class Plugin : IDalamudPlugin
         return name.Substring(start).Trim();
     }
 
-    private void OnChatMessage(XivChatType type, int timestamp, ref SeString sender, ref SeString message, ref bool isHandled)
+    private void OnChatMessage(Dalamud.Game.Chat.IChatMessage chat)
     {
-        if (type != GetSyncChatType()) return;
+        if (chat.LogKind != GetSyncChatType()) return;
 
-        var text = message.TextValue;
+        var text = chat.Message.TextValue;
         if (!text.StartsWith(SyncTag) && !text.StartsWith(SyncTagChunk)) return;
 
-        var rawName    = sender.TextValue;
+        var rawName    = chat.Sender.TextValue;
         var senderName = NormalizeSenderName(rawName);
 
         // Record for Share tab debug display
