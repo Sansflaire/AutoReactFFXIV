@@ -168,6 +168,11 @@ public sealed partial class Plugin : IDalamudPlugin
     private HashSet<uint> pvpTerritoryTypeIds = new HashSet<uint>();
     private bool currentlyInPvpInstance = false;
 
+    // Frontline territory IDs — ContentFinderCondition rows whose ContentUICategory is
+    // row 3 ("Frontline"). Gates the target-name overlay.
+    private const uint FrontlineContentUiCategoryId = 3;
+    private HashSet<uint> frontlineTerritoryTypeIds = new HashSet<uint>();
+
     // Per-game tracking (cleared on zone change)
     private HashSet<string> seenThisGame = new HashSet<string>();
 
@@ -425,8 +430,11 @@ public sealed partial class Plugin : IDalamudPlugin
                 {
                     if (cfc.PvP && cfc.TerritoryType.IsValid && cfc.TerritoryType.RowId != 0)
                         pvpTerritoryTypeIds.Add(cfc.TerritoryType.RowId);
+                    if (cfc.PvP && cfc.ContentUICategory.RowId == FrontlineContentUiCategoryId && cfc.TerritoryType.RowId != 0)
+                        frontlineTerritoryTypeIds.Add(cfc.TerritoryType.RowId);
                 }
                 Log.Info($"Resolved {pvpTerritoryTypeIds.Count} PvP territory type IDs.");
+                Log.Info($"Resolved {frontlineTerritoryTypeIds.Count} Frontline territory type IDs: {string.Join(", ", frontlineTerritoryTypeIds)}");
             }
         }
         catch (Exception ex)
@@ -1054,7 +1062,7 @@ public sealed partial class Plugin : IDalamudPlugin
         if (config.SightEnabled)
             DrawSightOverlay();
 
-        if (config.ShowTargetName)
+        if (config.ShowTargetName && frontlineTerritoryTypeIds.Contains(ClientState.TerritoryType))
             DrawTargetNameOverlay();
 
         DrawLocalDevOverlay();
@@ -2627,7 +2635,7 @@ public sealed partial class Plugin : IDalamudPlugin
         ImGui.Spacing();
 
         var showTargetName = config.ShowTargetName;
-        if (ImGui.Checkbox("Show targeted player's name over their head##showTargetName", ref showTargetName))
+        if (ImGui.Checkbox("Show targeted player's name over their head (Frontline only)##showTargetName", ref showTargetName))
         {
             config.ShowTargetName = showTargetName;
             PluginInterface.SavePluginConfig(config);
