@@ -64,6 +64,8 @@ public sealed class Configuration : IPluginConfiguration
     public bool SightShowDiamonds { get; set; } = true;
     public bool SightShowCircles { get; set; } = true;
     public bool SightShowJobIcons { get; set; } = false;
+    public bool ShowTargetName { get; set; } = true;
+    public float TargetNameScale { get; set; } = 1.2f;
 
     // Victims tab
     public List<VictimEntry> Victims { get; set; } = new List<VictimEntry>();

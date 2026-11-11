@@ -4,3 +4,7 @@ src/bin/
 src/obj/
 *.user
 .vs/
+
+# Local-only dev extensions — never committed. See src/Plugin.LocalDev.cs and pre-commit hook.
+src/Plugin.LocalDev.cs
+src/*.LocalDev.cs

@@ -24,7 +24,7 @@ using FFXIVClientStructs.FFXIV.Client.UI;
 
 namespace AutoReactFFXIV;
 
-public sealed class Plugin : IDalamudPlugin
+public sealed partial class Plugin : IDalamudPlugin
 {
     [PluginService] internal static IDalamudPluginInterface PluginInterface { get; private set; } = null!;
     [PluginService] internal static IPluginLog Log { get; private set; } = null!;
@@ -1054,6 +1054,11 @@ public sealed class Plugin : IDalamudPlugin
         if (config.SightEnabled)
             DrawSightOverlay();
 
+        if (config.ShowTargetName)
+            DrawTargetNameOverlay();
+
+        DrawLocalDevOverlay();
+
         if (!showWindow)
             return;
 
@@ -1918,6 +1923,40 @@ public sealed class Plugin : IDalamudPlugin
         }
     }
 
+    // Name label above the current target when it is a player. Sits above the
+    // SIGHT shapes (which are centred on head + 2.3y) so the two never overlap.
+    private void DrawTargetNameOverlay()
+    {
+        if (TargetManager.Target is not IPlayerCharacter pc) return;
+
+        var name = pc.Name.TextValue;
+        if (string.IsNullOrEmpty(name)) return;
+
+        var pos = pc.Position;
+        var headPos = new Vector3(pos.X, pos.Y + 2.3f, pos.Z);
+        if (!GameGui.WorldToScreen(headPos, out Vector2 screenPos)) return;
+
+        var drawList = ImGui.GetForegroundDrawList();
+        var font = ImGui.GetFont();
+        float fontSize = ImGui.GetFontSize() * Math.Clamp(config.TargetNameScale, 0.6f, 3.0f);
+        float shapeRadius = Math.Max(22f * config.SightDiamondScale, 22f * config.SightCircleScale);
+
+        var textSize = ImGui.CalcTextSize(name) * (fontSize / ImGui.GetFontSize());
+        var textPos = new Vector2(screenPos.X - textSize.X / 2f,
+                                  screenPos.Y - shapeRadius - 6f - textSize.Y);
+
+        uint outlineColor = ImGui.GetColorU32(new Vector4(0.0f, 0.0f, 0.0f, 0.9f));
+        uint textColor    = ImGui.GetColorU32(new Vector4(1.0f, 1.0f, 1.0f, 1.0f));
+
+        for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            if (dx == 0 && dy == 0) continue;
+            drawList.AddText(font, fontSize, textPos + new Vector2(dx, dy) * 1.5f, outlineColor, name);
+        }
+        drawList.AddText(font, fontSize, textPos, textColor, name);
+    }
+
     private void DrawVictimsTab()
     {
         ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Players hit by Marksman's Spite");
@@ -2580,6 +2619,27 @@ public sealed class Plugin : IDalamudPlugin
             config.SightShowJobIcons = showJobIcons;
             PluginInterface.SavePluginConfig(config);
         }
+
+        ImGui.Spacing();
+        ImGui.Spacing();
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Target Name");
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        var showTargetName = config.ShowTargetName;
+        if (ImGui.Checkbox("Show targeted player's name over their head##showTargetName", ref showTargetName))
+        {
+            config.ShowTargetName = showTargetName;
+            PluginInterface.SavePluginConfig(config);
+        }
+
+        var targetNameScale = config.TargetNameScale;
+        ImGui.SetNextItemWidth(200);
+        if (ImGui.SliderFloat("Name text scale##targetNameScale", ref targetNameScale, 0.6f, 3.0f, "%.1f"))
+        {
+            config.TargetNameScale = targetNameScale;
+            PluginInterface.SavePluginConfig(config);
+        }
     }
 
     private void DrawAvoidTab()
@@ -2724,6 +2784,10 @@ public sealed class Plugin : IDalamudPlugin
         var left   = new Vector2(center.X - size, center.Y);
         drawList.AddQuadFilled(top, right, bottom, left, color);
     }
+
+    // Extensibility hook for untracked local-only overlays.
+    // Partial method with no implementation is compile-stripped — call site and declaration both disappear.
+    partial void DrawLocalDevOverlay();
 
     private static void DrawStar(ImDrawListPtr drawList, Vector2 center, float outerR, float innerR, uint color, float thickness)
     {
