@@ -173,6 +173,11 @@ public sealed partial class Plugin : IDalamudPlugin
     private const uint FrontlineContentUiCategoryId = 3;
     private HashSet<uint> frontlineTerritoryTypeIds = new HashSet<uint>();
 
+    // Star tab input state
+    private string starNameInput  = string.Empty;
+    private string starWorldInput = string.Empty;
+    private string starError      = string.Empty;
+
     // Per-game tracking (cleared on zone change)
     private HashSet<string> seenThisGame = new HashSet<string>();
 
@@ -1062,8 +1067,11 @@ public sealed partial class Plugin : IDalamudPlugin
         if (config.SightEnabled)
             DrawSightOverlay();
 
-        if (config.ShowTargetName && frontlineTerritoryTypeIds.Contains(ClientState.TerritoryType))
+        bool inFrontline = frontlineTerritoryTypeIds.Contains(ClientState.TerritoryType);
+        if (config.ShowTargetName && inFrontline)
             DrawTargetNameOverlay();
+        if (inFrontline && config.StarList.Count > 0)
+            DrawStarListOverlay();
 
         DrawLocalDevOverlay();
 
@@ -1115,6 +1123,13 @@ public sealed partial class Plugin : IDalamudPlugin
                 {
                     if (isBanned) ImGui.TextUnformatted("Sorry pal... Not today!");
                     else DrawAvoidTab();
+                    ImGui.EndTabItem();
+                }
+
+                if (ImGui.BeginTabItem("Star"))
+                {
+                    if (isBanned) ImGui.TextUnformatted("Sorry pal... Not today!");
+                    else DrawStarTab();
                     ImGui.EndTabItem();
                 }
 
@@ -1963,6 +1978,131 @@ public sealed partial class Plugin : IDalamudPlugin
             drawList.AddText(font, fontSize, textPos + new Vector2(dx, dy) * 1.5f, outlineColor, name);
         }
         drawList.AddText(font, fontSize, textPos, textColor, name);
+    }
+
+    // Yellow star above every player on the Star list (name + home world match).
+    private void DrawStarListOverlay()
+    {
+        if (ObjectTable.LocalPlayer == null) return;
+
+        var drawList = ImGui.GetBackgroundDrawList();
+        uint starColor = ImGui.GetColorU32(new Vector4(1.0f, 0.9f, 0.2f, 1.0f));
+
+        foreach (var obj in ObjectTable)
+        {
+            if (obj is not IPlayerCharacter pc) continue;
+            if (!IsStarred(pc.Name.TextValue, pc.HomeWorld.Value.Name.ToString())) continue;
+
+            var pos = pc.Position;
+            var headPos = new Vector3(pos.X, pos.Y + 2.3f, pos.Z);
+            if (!GameGui.WorldToScreen(headPos, out Vector2 screenPos)) continue;
+
+            DrawStar(drawList, screenPos, 16f, 7f, starColor, 2.0f);
+        }
+    }
+
+    private bool IsStarred(string name, string world) =>
+        config.StarList.Exists(s => string.Equals(s.Name, name, StringComparison.OrdinalIgnoreCase)
+                                 && string.Equals(s.World, world, StringComparison.OrdinalIgnoreCase));
+
+    private void DrawStarTab()
+    {
+        ImGui.TextColored(new Vector4(1.0f, 0.9f, 0.2f, 1.0f), "★ ");
+        ImGui.SameLine();
+        ImGui.TextColored(new Vector4(0.8f, 0.8f, 0.2f, 1.0f), "Star — players shown with a star over their head");
+        ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), "Only drawn inside Frontline maps. Matches name + home world.");
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        ImGui.SetNextItemWidth(170);
+        ImGui.InputTextWithHint("##starName", "First Last", ref starNameInput, 32);
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(110);
+        ImGui.InputTextWithHint("##starWorld", "World", ref starWorldInput, 32);
+        ImGui.SameLine();
+        if (ImGui.Button("Add##starAdd"))
+            TryAddStar(starNameInput, starWorldInput);
+
+        if (ImGui.Button("Add current target##starAddTarget"))
+        {
+            if (TargetManager.Target is IPlayerCharacter tpc)
+                TryAddStar(tpc.Name.TextValue, tpc.HomeWorld.Value.Name.ToString());
+            else
+                starError = "Target a player first.";
+        }
+
+        if (!string.IsNullOrEmpty(starError))
+            ImGui.TextColored(new Vector4(1.0f, 0.4f, 0.4f, 1.0f), starError);
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        ImGui.Spacing();
+
+        if (config.StarList.Count == 0)
+        {
+            ImGui.TextColored(new Vector4(0.5f, 0.5f, 0.5f, 1.0f), "No starred players yet.");
+            return;
+        }
+
+        for (int i = config.StarList.Count - 1; i >= 0; i--)
+        {
+            var entry = config.StarList[i];
+            ImGui.TextColored(new Vector4(1.0f, 0.9f, 0.2f, 1.0f), $"★ {entry.Name}");
+            ImGui.SameLine();
+            ImGui.TextColored(new Vector4(0.6f, 0.6f, 0.6f, 1.0f), $"@ {entry.World}");
+            ImGui.SameLine();
+            if (ImGui.SmallButton($"Remove##star{i}"))
+            {
+                config.StarList.RemoveAt(i);
+                PluginInterface.SavePluginConfig(config);
+            }
+        }
+    }
+
+    private void TryAddStar(string name, string world)
+    {
+        name  = (name ?? string.Empty).Trim();
+        world = (world ?? string.Empty).Trim();
+        if (name.Length == 0 || world.Length == 0)
+        {
+            starError = "Enter both a name and a world.";
+            return;
+        }
+
+        // Normalise the world to the sheet's spelling so matching is exact
+        string? canonicalWorld = null;
+        var worldSheet = DataManager.GetExcelSheet<Lumina.Excel.Sheets.World>();
+        if (worldSheet != null)
+        {
+            foreach (var w in worldSheet)
+            {
+                if (!w.IsPublic) continue;
+                var wName = w.Name.ToString();
+                if (string.Equals(wName, world, StringComparison.OrdinalIgnoreCase))
+                {
+                    canonicalWorld = wName;
+                    break;
+                }
+            }
+        }
+        if (canonicalWorld == null)
+        {
+            starError = $"Unknown world '{world}'.";
+            return;
+        }
+
+        if (IsStarred(name, canonicalWorld))
+        {
+            starError = $"{name} @ {canonicalWorld} is already starred.";
+            return;
+        }
+
+        config.StarList.Add(new StarEntry { Name = name, World = canonicalWorld });
+        PluginInterface.SavePluginConfig(config);
+        Log.Info($"STAR: added '{name}' @ {canonicalWorld}");
+        starError      = string.Empty;
+        starNameInput  = string.Empty;
+        starWorldInput = string.Empty;
     }
 
     private void DrawVictimsTab()

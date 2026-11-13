@@ -22,6 +22,13 @@ public sealed class VictimEntry
 }
 
 [Serializable]
+public sealed class StarEntry
+{
+    public string Name  { get; set; } = string.Empty;
+    public string World { get; set; } = string.Empty;
+}
+
+[Serializable]
 public sealed class SyncPayload
 {
     public List<string> Victims { get; set; } = new List<string>();
@@ -72,6 +79,9 @@ public sealed class Configuration : IPluginConfiguration
 
     // AVOID tab
     public List<string> AvoidList { get; set; } = new List<string>();
+
+    // STAR tab — players drawn with a star over their head in Frontline
+    public List<StarEntry> StarList { get; set; } = new List<StarEntry>();
 
     // Share tab
     public SyncChannel SyncChatChannel { get; set; } = SyncChannel.Party;
